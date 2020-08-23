@@ -71,17 +71,45 @@ fn byte(input: &[u8]) -> IParserResult<u8> {
 
 /// Read an unsigned int.
 fn unsigned_int(size: usize, input: &[u8]) -> IParserResult<u64> {
-    todo!()
+    let mut next = input;
+    let mut result = 0u64;
+    let mut shift = 0u64;
+    loop {
+        let (n, byte) = take1(next)?;
+        result |= ((byte & 0x7f) as u64) << shift;
+        shift += 7;
+        next = n;
+        if (0x80 & byte) == 0 {
+            return Ok((n, result))
+        }
+    }
 }
 
 /// Read a signed int
 fn signed_int(size: usize, input: &[u8]) -> IParserResult<i64> {
-    todo!()
+    let mut next = input;
+    let mut result = 0i64;
+    let mut shift = 0u64;
+
+    loop {
+        let (n, byte) = take1(next)?;
+        result |= ((byte & 0x7f) as i64) << shift;
+        shift += 7;
+        next = n;
+        if (0x80 & byte) == 0 {
+            if (shift < size as u64) && (byte & 0x40) != 0 {
+                result |= !0 << shift
+            }
+            break;
+        }
+    }
+
+    Ok((next, result))
 }
 
 /// Reads the length of a vector
 fn vector_length(input: &[u8]) -> IParserResult<u32> {
-    todo!()
+    unsigned_int(32, input).map_output(|n| n as u32)
 }
 
 /// Read a name, this parser expects a length read from a previous
@@ -179,6 +207,54 @@ fn globaltype(input: &[u8]) -> IParserResult<WasmGlobalType> {
 
 /* Instructions */
 
+fn blocktype_empty(input: &[u8]) -> IParserResult<WasmBlockType> {
+    tag_return(0x40, WasmBlockType::Empty)(input)
+}
+
+fn blocktype_valtype(input: &[u8]) -> IParserResult<WasmBlockType> {
+    valtype(input).map_output(|t| WasmBlockType::Valtype(t))
+}
+
+fn blocktype_typeindex(input: &[u8]) -> IParserResult<WasmBlockType> {
+    signed_int(33, input).map_output(|index| WasmBlockType::TypeIndex(index as i32))
+}
+
+fn blocktype(input: &[u8]) -> IParserResult<WasmBlockType> {
+    alt((
+        blocktype_empty,
+        blocktype_valtype,
+        blocktype_typeindex
+    ))(input)
+}
+
+/* Modules */
+
+
+fn typeidx(input: &[u8]) -> IParserResult<u32> {
+    unsigned_int(32,  input).map_output(|idx| idx as u32)
+}
+fn funcidx(input: &[u8]) -> IParserResult<u32> {
+    unsigned_int(32,  input).map_output(|idx| idx as u32)
+}
+fn tableidx(input: &[u8]) -> IParserResult<u32> {
+    unsigned_int(32,  input).map_output(|idx| idx as u32)
+}
+fn memidx(input: &[u8]) -> IParserResult<u32> {
+    unsigned_int(32,  input).map_output(|idx| idx as u32)
+}
+fn globalidx(input: &[u8]) -> IParserResult<u32> {
+    unsigned_int(32,  input).map_output(|idx| idx as u32)
+}
+fn localidx(input: &[u8]) -> IParserResult<u32> {
+    unsigned_int(32,  input).map_output(|idx| idx as u32)
+}
+fn labelidx(input: &[u8]) -> IParserResult<u32> {
+    unsigned_int(32,  input).map_output(|idx| idx as u32)
+}
+
+fn section<'t>(input: &'t [u8]) -> IParserResult<WasmSection<'t>> {
+    todo!()
+}
 
 #[cfg(test)]
 mod tests {
@@ -190,6 +266,16 @@ mod tests {
     }
 
     #[test]
+    fn test_unsigned_int() {
+        assert_eq!(unsigned_int(32, &[0xE5, 0x8E, 0x26]), Ok((vec![].as_ref(), 624485)));
+    }
+
+    #[test]
+    fn test_signed_int() {
+        assert_eq!(signed_int(32, &[0xC0, 0xBB, 0x78]), Ok((vec![].as_ref(), -123456)));
+    }
+
+    #[test]
     fn test_valtype() {
         assert_eq!(valtype(&[0x7F]), Ok((vec![].as_ref(), WasmType::I32)));
         assert_eq!(valtype(&[0x7E]), Ok((vec![].as_ref(), WasmType::I64)));
@@ -198,5 +284,8 @@ mod tests {
     }
 
     #[test]
-    fn test_resulttype() {}
+    fn test_resulttype() {
+        use WasmType::*;
+        assert_eq!(resulttype(&[0x03, 0x7F, 0x7E, 0x7E]), Ok((vec![].as_ref(), vec![I32, I64, I64])));
+    }
 }
