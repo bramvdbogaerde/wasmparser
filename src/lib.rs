@@ -53,7 +53,7 @@ fn tag_return<'t, T: Clone>(t: u8, ret: T) -> impl Fn(&'t [u8]) -> IParserResult
 }
 
 fn tag_<'t>(t: u8) -> impl Parser<&'t [u8], u8, (&'t [u8], nom::error::ErrorKind)> {
-        tag_return::<'t>(t, t)
+    tag_return::<'t>(t, t)
 }
 
 fn many_m<I, O, E>(m: usize, parser: impl Parser<I, O, E>) -> impl Parser<I, Vec<O>, E>
@@ -80,7 +80,7 @@ fn unsigned_int(size: usize, input: &[u8]) -> IParserResult<u64> {
         shift += 7;
         next = n;
         if (0x80 & byte) == 0 {
-            return Ok((n, result))
+            return Ok((n, result));
         }
     }
 }
@@ -197,12 +197,15 @@ fn tabletype(input: &[u8]) -> IParserResult<WasmTableType> {
 fn globaltype(input: &[u8]) -> IParserResult<WasmGlobalType> {
     let (next, t) = valtype(input)?;
     let (next, m) = alt((tag_(0x00), tag_(0x01)))(next)?;
-    Ok((next, match m {
-        0x00 => WasmGlobalType::Const(t),
-        0x01 => WasmGlobalType::Var(t),
-        // this should never happen because of the alt above
-        _ => panic!("not a valid global type")
-    }))
+    Ok((
+        next,
+        match m {
+            0x00 => WasmGlobalType::Const(t),
+            0x01 => WasmGlobalType::Var(t),
+            // this should never happen because of the alt above
+            _ => panic!("not a valid global type"),
+        },
+    ))
 }
 
 /* Instructions */
@@ -220,39 +223,59 @@ fn blocktype_typeindex(input: &[u8]) -> IParserResult<WasmBlockType> {
 }
 
 fn blocktype(input: &[u8]) -> IParserResult<WasmBlockType> {
-    alt((
-        blocktype_empty,
-        blocktype_valtype,
-        blocktype_typeindex
-    ))(input)
+    alt((blocktype_empty, blocktype_valtype, blocktype_typeindex))(input)
 }
 
 /* Modules */
 
-
 fn typeidx(input: &[u8]) -> IParserResult<u32> {
-    unsigned_int(32,  input).map_output(|idx| idx as u32)
+    unsigned_int(32, input).map_output(|idx| idx as u32)
 }
 fn funcidx(input: &[u8]) -> IParserResult<u32> {
-    unsigned_int(32,  input).map_output(|idx| idx as u32)
+    unsigned_int(32, input).map_output(|idx| idx as u32)
 }
 fn tableidx(input: &[u8]) -> IParserResult<u32> {
-    unsigned_int(32,  input).map_output(|idx| idx as u32)
+    unsigned_int(32, input).map_output(|idx| idx as u32)
 }
 fn memidx(input: &[u8]) -> IParserResult<u32> {
-    unsigned_int(32,  input).map_output(|idx| idx as u32)
+    unsigned_int(32, input).map_output(|idx| idx as u32)
 }
 fn globalidx(input: &[u8]) -> IParserResult<u32> {
-    unsigned_int(32,  input).map_output(|idx| idx as u32)
+    unsigned_int(32, input).map_output(|idx| idx as u32)
 }
 fn localidx(input: &[u8]) -> IParserResult<u32> {
-    unsigned_int(32,  input).map_output(|idx| idx as u32)
+    unsigned_int(32, input).map_output(|idx| idx as u32)
 }
 fn labelidx(input: &[u8]) -> IParserResult<u32> {
-    unsigned_int(32,  input).map_output(|idx| idx as u32)
+    unsigned_int(32, input).map_output(|idx| idx as u32)
 }
 
-fn section<'t>(input: &'t [u8]) -> IParserResult<WasmSection<'t>> {
+fn section_id_size(id: u8, input: &[u8]) -> IParserResult<u32> {
+    tuple((tag_(id), vector_length))(input).map_output(|(_, size)| size)
+}
+
+fn custom_section<'t>(input: &'t [u8]) -> IParserResult<WasmSectionContent<'t>> {
+    let (next_begin, size) = section_id_size(0x00, input)?;
+    let (next, name) = name(next_begin)?;
+    // subtract 4 for the length of the name, then subtract the length
+    let (next, bytes) = take(size - ((next_begin.len() - next.len()) as u32))(next)?;
+    Ok((
+        next,
+        WasmSectionContent::CustomSection {
+            name: name.to_string(),
+            bytes,
+        },
+    ))
+}
+
+fn type_section<'t>(input: &'t [u8]) -> IParserResult<WasmSectionContent<'t>> {
+    let (next, _) = section_id_size(0x01, input)?;
+    let (next, length) = vector_length(next)?;
+    let (next, functypes) = many_m(length as usize, functype)(next)?;
+    Ok((next, WasmSectionContent::TypeSection { types: functypes }))
+}
+
+fn sections<'t>(input: &'t [u8]) -> IParserResult<WasmSection<'t>> {
     todo!()
 }
 
@@ -267,12 +290,18 @@ mod tests {
 
     #[test]
     fn test_unsigned_int() {
-        assert_eq!(unsigned_int(32, &[0xE5, 0x8E, 0x26]), Ok((vec![].as_ref(), 624485)));
+        assert_eq!(
+            unsigned_int(32, &[0xE5, 0x8E, 0x26]),
+            Ok((vec![].as_ref(), 624485))
+        );
     }
 
     #[test]
     fn test_signed_int() {
-        assert_eq!(signed_int(32, &[0xC0, 0xBB, 0x78]), Ok((vec![].as_ref(), -123456)));
+        assert_eq!(
+            signed_int(32, &[0xC0, 0xBB, 0x78]),
+            Ok((vec![].as_ref(), -123456))
+        );
     }
 
     #[test]
@@ -286,6 +315,24 @@ mod tests {
     #[test]
     fn test_resulttype() {
         use WasmType::*;
-        assert_eq!(resulttype(&[0x03, 0x7F, 0x7E, 0x7E]), Ok((vec![].as_ref(), vec![I32, I64, I64])));
+        assert_eq!(
+            resulttype(&[0x03, 0x7F, 0x7E, 0x7E]),
+            Ok((vec![].as_ref(), vec![I32, I64, I64]))
+        );
+    }
+
+    #[test]
+    fn test_custom_section() {
+        let contents = vec![0x00, 0x8, 0x5, 104, 101, 108, 108, 111, 0xFF, 0xFE];
+        assert_eq!(
+            custom_section(contents.as_ref()),
+            Ok((
+                vec![].as_ref(),
+                WasmSectionContent::CustomSection {
+                    name: "hello".to_string(),
+                    bytes: vec![0xFF, 0xFE].as_ref(),
+                }
+            ))
+        );
     }
 }
